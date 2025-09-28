@@ -9,7 +9,7 @@ All colors MUST be HSL.
 @layer base {
   :root {
     /* Game Background */
-    --background: 230 100% 98%;
+    --background: 210 100% 97%;
     --foreground: 230 15% 15%;
 
     /* Card System */
@@ -37,7 +37,7 @@ All colors MUST be HSL.
     --popover: 0 0% 100%;
     --popover-foreground: 230 15% 15%;
 
-    --muted: 230 20% 95%;
+    --muted: 210 40% 92%;
     --muted-foreground: 230 10% 50%;
 
     --accent: 280 60% 70%;
