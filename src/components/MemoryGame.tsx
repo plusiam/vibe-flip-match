@@ -165,19 +165,29 @@ const MemoryGame = () => {
   const [streak, setStreak] = useState(0);
   const [showDifficulty, setShowDifficulty] = useState(false);
   const [showCategory, setShowCategory] = useState(false);
+  const [finalScore, setFinalScore] = useState(0);
+  const [scoreSaved, setScoreSaved] = useState(false);
   const hintTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const { toast } = useToast();
 
-  // 점수 계산 함수 (난이도와 연속 성공 보너스 포함)
-  const calculateScore = (timeElapsed: number, movesCount: number) => {
+  // 매칭당 점수 계산 함수
+  const calculateMatchScore = (streakCount: number) => {
     const diff = DIFFICULTY_LEVELS[difficulty];
-    const baseScore = 1000 * diff.scoreMultiplier;
-    const timeBonus = Math.max(0, diff.timeBonus - timeElapsed) * 2;
-    const movePenalty = movesCount * 5;
-    const streakBonus = streak * 50;
-    const hintPenalty = hintsUsed * 100;
+    const baseScore = 100 * diff.scoreMultiplier;
+    const streakBonus = streakCount * 20;
     
-    return Math.max(100, Math.floor(baseScore + timeBonus - movePenalty + streakBonus - hintPenalty));
+    return Math.floor(baseScore + streakBonus);
+  };
+
+  // 게임 완료 보너스 점수 계산
+  const calculateCompletionBonus = (timeElapsed: number, movesCount: number) => {
+    const diff = DIFFICULTY_LEVELS[difficulty];
+    const timeBonus = Math.max(0, diff.timeBonus - timeElapsed) * 3;
+    const moveBonus = Math.max(0, (diff.pairs * 3 - movesCount)) * 10;
+    const perfectBonus = movesCount === diff.pairs ? 500 * diff.scoreMultiplier : 0;
+    const hintPenalty = hintsUsed * 50;
+    
+    return Math.max(0, Math.floor(timeBonus + moveBonus + perfectBonus - hintPenalty));
   };
 
   // 힌트 시스템
@@ -287,6 +297,8 @@ const MemoryGame = () => {
     setHintsUsed(0);
     setWrongAttempts(0);
     setStreak(0);
+    setFinalScore(0);
+    setScoreSaved(false);
     
     if (soundEnabled) playSound('start');
   };
@@ -371,19 +383,19 @@ const MemoryGame = () => {
         )
       );
       
-      setStreak(prev => prev + 1);
+      const newStreak = streak + 1;
+      setStreak(newStreak);
       setWrongAttempts(0);
       
-      // 점수 추가
-      const matchScore = calculateScore(time, moves);
-      const pairScore = Math.floor(matchScore / DIFFICULTY_LEVELS[difficulty].pairs);
-      setScore(prevScore => prevScore + pairScore);
+      // 매칭당 점수 계산 및 추가
+      const matchScore = calculateMatchScore(newStreak);
+      setScore(prevScore => prevScore + matchScore);
       
       if (soundEnabled) playSound('match');
       
       toast({
-        title: `매칭 성공! ${streak > 1 ? `🔥 ${streak}연속!` : '🎉'}`,
-        description: `+${pairScore}점 획득!`,
+        title: `매칭 성공! ${newStreak > 1 ? `🔥 ${newStreak}연속!` : '🎉'}`,
+        description: `+${matchScore}점 획득!`,
       });
     } else {
       // 매칭 실패
@@ -414,29 +426,41 @@ const MemoryGame = () => {
 
   // 게임 완료 확인
   useEffect(() => {
+    if (!isGameActive || scoreSaved) return;
+    
     if (cards.length > 0 && cards.every(card => card.isMatched)) {
       setIsGameActive(false);
       setGameCompleted(true);
       
-      // 최종 점수 계산
-      const finalScore = score + calculateScore(time, moves);
-      setScore(finalScore);
+      // 완료 보너스 계산 및 추가
+      const completionBonus = calculateCompletionBonus(time, moves);
+      const totalScore = score + completionBonus;
+      setFinalScore(totalScore);
       
       if (soundEnabled) playSound('complete');
       
-      // 데이터베이스에 저장
-      saveGameRecord(finalScore);
+      // 게임 완료 토스트
+      toast({
+        title: "🎉 게임 완료!",
+        description: `완료 보너스 +${completionBonus}점`,
+      });
+      
+      // 데이터베이스에 저장 (한 번만 실행되도록)
+      if (!scoreSaved) {
+        setScoreSaved(true);
+        saveGameRecord(totalScore);
+      }
     }
-  }, [cards, score, time, moves]);
+  }, [cards, isGameActive, score, time, moves, soundEnabled, scoreSaved]);
 
   // 게임 기록 저장
-  const saveGameRecord = async (finalScore: number) => {
+  const saveGameRecord = async (totalScore: number) => {
     try {
       const { error } = await supabase
         .from('game_records')
         .insert({
           player_name: playerName,
-          score: finalScore,
+          score: totalScore,
           time_seconds: time,
           moves: moves,
           difficulty,
@@ -451,8 +475,8 @@ const MemoryGame = () => {
       const categoryName = LEARNING_CATEGORIES[category].name;
       
       toast({
-        title: "게임 완료! 🎊",
-        description: `${difficultyName} 난이도, ${categoryName} 카테고리에서 ${finalScore.toLocaleString()}점 획득!`,
+        title: "기록 저장 완료! 🎊",
+        description: `${difficultyName} 난이도, ${categoryName} 카테고리에서 ${totalScore.toLocaleString()}점 획득!`,
       });
     } catch (error) {
       console.error('게임 기록 저장 중 오류:', error);
@@ -519,7 +543,9 @@ const MemoryGame = () => {
             <div className="text-sm text-muted-foreground">시도</div>
           </div>
           <div className="text-center">
-            <div className="text-2xl font-bold text-success">{score.toLocaleString()}</div>
+            <div className="text-2xl font-bold text-success">
+              {gameCompleted ? finalScore.toLocaleString() : score.toLocaleString()}
+            </div>
             <div className="text-sm text-muted-foreground">점수</div>
           </div>
           {streak > 0 && (
@@ -635,7 +661,7 @@ const MemoryGame = () => {
             {moves}번의 시도로 {formatTime(time)}만에 게임을 완료했습니다!
           </p>
           <p className="text-xl font-bold text-primary mb-4">
-            최종 점수: {score.toLocaleString()}점
+            최종 점수: {finalScore.toLocaleString()}점
           </p>
           <div className="flex gap-2 justify-center">
             <Button 
